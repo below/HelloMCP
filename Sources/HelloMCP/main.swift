@@ -1,5 +1,6 @@
 import MCP
 import FoundationModels
+import Foundation
 
 // Create a server with given capabilities
 let server = Server(
@@ -14,6 +15,11 @@ let server = Server(
 
 // Create transport and start server
 let transport = HTTPClientTransport(endpoint: URL(string: "http://127.0.0.1:5678")!)
+do {
+    try await server.start(transport: transport)
+} catch {
+    debugPrint("Unable to start server: \(error)")
+}
 
 // Now register handlers for the capabilities you've enabled
 
