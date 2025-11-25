@@ -1,10 +1,12 @@
 import MCP
-import FoundationModels
-import Foundation
+import ServiceLifecycle
+import Logging
 
-// Create a server with given capabilities
+let logger = Logger(label: "com.example.mcp-server")
+
+// Create the MCP server
 let server = Server(
-    name: "MyModelServer",
+    name: "HelloMCP",
     version: "1.0.0",
     capabilities: .init(
         prompts: .init(listChanged: true),
@@ -13,19 +15,14 @@ let server = Server(
     )
 )
 
-// Create transport and start server
-let transport = StdioTransport()
-try await server.start(transport: transport)
-
-// Now register handlers for the capabilities you've enabled
-
-// Register a tool list handler
+// Add handlers directly to the server
 await server.withMethodHandler(ListTools.self) { _ in
     let tools = [
         Tool(
             name: "weather",
             description: "Get current weather for a location",
             inputSchema: .object([
+                "type": .string("object"),
                 "properties": .object([
                     "location": .string("City name or coordinates"),
                     "units": .string("Units of measurement, e.g., metric, imperial")
@@ -36,6 +33,7 @@ await server.withMethodHandler(ListTools.self) { _ in
             name: "calculator",
             description: "Perform calculations",
             inputSchema: .object([
+                "type": .string("object"),
                 "properties": .object([
                     "expression": .string("Mathematical expression to evaluate")
                 ])
@@ -45,7 +43,6 @@ await server.withMethodHandler(ListTools.self) { _ in
     return .init(tools: tools)
 }
 
-// Register a tool call handler
 await server.withMethodHandler(CallTool.self) { params in
     switch params.name {
     case "weather":
@@ -70,29 +67,16 @@ await server.withMethodHandler(CallTool.self) { params in
     }
 }
 
-// Register a resource list handler
-await server.withMethodHandler(ListResources.self) { params in
-    let resources = [
-        Resource(
-            name: "Knowledge Base Articles",
-            uri: "resource://knowledge-base/articles",
-            description: "Collection of support articles and documentation"
-        ),
-        Resource(
-            name: "System Status",
-            uri: "resource://system/status",
-            description: "Current system operational status"
-        )
-    ]
-    return .init(resources: resources, nextCursor: nil)
-}
+// Create MCP service and other services
+let transport = StdioTransport(logger: logger)
+let mcpService = MCPService(server: server, transport: transport)
 
-// MARK: -- Helper functions
+// Create service group with signal handling
+let serviceGroup = ServiceGroup(
+    services: [mcpService],
+    gracefulShutdownSignals: [.sigterm, .sigint],
+    logger: logger
+)
 
-func evaluateExpression(_ expression: String) -> String {
-    return "42"
-}
-
-func getWeatherData(location: String, units: String) -> (temperature: String, conditions: String) {
-    return (temperature: "22", conditions: "Sunny")
-}
+// Run the service group - this blocks until shutdown
+try await serviceGroup.run()
