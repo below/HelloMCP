@@ -4,7 +4,7 @@ import Foundation
 
 // Create a server with given capabilities
 let server = Server(
-    name: "HelloMCP",
+    name: "MyModelServer",
     version: "1.0.0",
     capabilities: .init(
         prompts: .init(listChanged: true),
@@ -14,12 +14,8 @@ let server = Server(
 )
 
 // Create transport and start server
-let transport = HTTPClientTransport(endpoint: URL(string: "http://127.0.0.1:5678")!)
-do {
-    try await server.start(transport: transport)
-} catch {
-    debugPrint("Unable to start server: \(error)")
-}
+let transport = StdioTransport()
+try await server.start(transport: transport)
 
 // Now register handlers for the capabilities you've enabled
 
@@ -27,15 +23,24 @@ do {
 await server.withMethodHandler(ListTools.self) { _ in
     let tools = [
         Tool(
-            name: "applechat",
-            description: "Get a reply from Apple Foundation Models",
+            name: "weather",
+            description: "Get current weather for a location",
             inputSchema: .object([
                 "properties": .object([
-                    "instructions": .string("Instructions to model"),
-                    "prompt": .string("Prompt")
+                    "location": .string("City name or coordinates"),
+                    "units": .string("Units of measurement, e.g., metric, imperial")
                 ])
             ])
         ),
+        Tool(
+            name: "calculator",
+            description: "Perform calculations",
+            inputSchema: .object([
+                "properties": .object([
+                    "expression": .string("Mathematical expression to evaluate")
+                ])
+            ])
+        )
     ]
     return .init(tools: tools)
 }
@@ -43,32 +48,51 @@ await server.withMethodHandler(ListTools.self) { _ in
 // Register a tool call handler
 await server.withMethodHandler(CallTool.self) { params in
     switch params.name {
-    case "applechat":
-        let instructions: String? = params.arguments?["instructions"]?.stringValue
-        let prompt = params.arguments?["prompt"]?.stringValue ?? ""
-        if #available(macOS 26.0, *) {
-            let model = SystemLanguageModel( guardrails: .permissiveContentTransformations)
-            guard model.availability == .available else {
-                return .init(content: [.text("Model not available")], isError: true)
-            }
-            let session = LanguageModelSession(model: model, instructions: instructions)
-            do {
-                let response = try await session.respond(to: prompt)
-                return .init(content: [.text(response.content)], isError: false)
-            } catch {
-                return .init(
-                    content: [.text("Unable to respond")],
-                    isError: false
-                )
-            }
+    case "weather":
+        let location = params.arguments?["location"]?.stringValue ?? "Unknown"
+        let units = params.arguments?["units"]?.stringValue ?? "metric"
+        let weatherData = getWeatherData(location: location, units: units) // Your implementation
+        return .init(
+            content: [.text("Weather for \(location): \(weatherData.temperature)°, \(weatherData.conditions)")],
+            isError: false
+        )
+
+    case "calculator":
+        if let expression = params.arguments?["expression"]?.stringValue {
+            let result = evaluateExpression(expression) // Your implementation
+            return .init(content: [.text("\(result)")], isError: false)
         } else {
-            return .init(
-                content: [.text("Tool Server is not on macOS 26")],
-                isError: false
-            )
+            return .init(content: [.text("Missing expression parameter")], isError: true)
         }
-        
+
     default:
         return .init(content: [.text("Unknown tool")], isError: true)
     }
+}
+
+// Register a resource list handler
+await server.withMethodHandler(ListResources.self) { params in
+    let resources = [
+        Resource(
+            name: "Knowledge Base Articles",
+            uri: "resource://knowledge-base/articles",
+            description: "Collection of support articles and documentation"
+        ),
+        Resource(
+            name: "System Status",
+            uri: "resource://system/status",
+            description: "Current system operational status"
+        )
+    ]
+    return .init(resources: resources, nextCursor: nil)
+}
+
+// MARK: -- Helper functions
+
+func evaluateExpression(_ expression: String) -> String {
+    return "42"
+}
+
+func getWeatherData(location: String, units: String) -> (temperature: String, conditions: String) {
+    return (temperature: "22", conditions: "Sunny")
 }
