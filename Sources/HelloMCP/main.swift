@@ -13,8 +13,7 @@ let server = Server(
 )
 
 // Create transport and start server
-let transport = StdioTransport()
-try await server.start(transport: transport)
+let transport = HTTPClientTransport(endpoint: URL(string: "http://127.0.0.1:5678")!)
 
 // Now register handlers for the capabilities you've enabled
 
