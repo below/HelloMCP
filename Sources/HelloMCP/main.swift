@@ -1,4 +1,5 @@
 import MCP
+import FoundationModels
 import ServiceLifecycle
 import Logging
 
@@ -18,6 +19,23 @@ let server = Server(
 // Add handlers directly to the server
 await server.withMethodHandler(ListTools.self) { _ in
     let tools = [
+        Tool(
+            name: "applechat",
+            description: "Execute a string using Apple Foundation Models",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "instructions": .object([
+                        "description": .string("Instructions to model"),
+                        "type": .string("string")
+                    ]),
+                    "prompt": .object([
+                    "description": .string("Instructions to model"),
+                    "type": .string("string")
+                    ])
+                ])
+            ])
+        ),
         Tool(
             name: "weather",
             description: "Get current weather for a location",
@@ -52,6 +70,31 @@ await server.withMethodHandler(ListTools.self) { _ in
 
 await server.withMethodHandler(CallTool.self) { params in
     switch params.name {
+    case "applechat":
+        let instructions: String? = params.arguments?["instructions"]?.stringValue
+        let prompt = params.arguments?["prompt"]?.stringValue ?? ""
+        if #available(macOS 26.0, *) {
+            let model = SystemLanguageModel( guardrails: .permissiveContentTransformations)
+            guard model.availability == .available else {
+                return .init(content: [.text("Model not available")], isError: true)
+            }
+            let session = LanguageModelSession(model: model, instructions: instructions)
+            do {
+                let response = try await session.respond(to: prompt)
+                return .init(content: [.text(response.content)], isError: false)
+            } catch {
+                return .init(
+                    content: [.text("Unable to respond")],
+                    isError: true
+                )
+            }
+        } else {
+            return .init(
+                content: [.text("Tool Server is not on macOS 26")],
+                isError: true
+            )
+        }
+
     case "weather":
         let location = params.arguments?["location"]?.stringValue ?? "Unknown"
         let units = params.arguments?["units"]?.stringValue ?? "metric"
