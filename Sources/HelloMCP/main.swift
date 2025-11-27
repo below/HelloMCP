@@ -171,6 +171,59 @@ await server.withMethodHandler(ReadResource.self) { params in
     }
 }
 
+// MARK: Prompts
+
+// Register a prompt list handler
+await server.withMethodHandler(ListPrompts.self) { params in
+    let prompts = [
+        Prompt(
+            name: "interview",
+            description: "Job interview conversation starter",
+            arguments: [
+                .init(name: "position", description: "Job position", required: true),
+                .init(name: "company", description: "Company name", required: true),
+                .init(name: "interviewee", description: "Candidate name")
+            ]
+        ),
+        Prompt(
+            name: "customer-support",
+            description: "Customer support conversation starter",
+            arguments: [
+                .init(name: "issue", description: "Customer issue", required: true),
+                .init(name: "product", description: "Product name", required: true)
+            ]
+        )
+    ]
+    return .init(prompts: prompts, nextCursor: nil)
+}
+
+// Register a prompt get handler
+await server.withMethodHandler(GetPrompt.self) { params in
+    switch params.name {
+    case "interview":
+        let position = params.arguments?["position"]?.stringValue ?? "Software Engineer"
+        let company = params.arguments?["company"]?.stringValue ?? "Acme Corp"
+        let interviewee = params.arguments?["interviewee"]?.stringValue ?? "Candidate"
+        
+        let description = "Job interview for \(position) position at \(company)"
+        let messages: [MCP.Prompt.Message] = [
+            .user("You are an interviewer for the \(position) position at \(company)."),
+            .user("Hello, I'm \(interviewee) and I'm here for the \(position) interview."),
+            .assistant("Hi \(interviewee), welcome to \(company)! I'd like to start by asking about your background and experience.")
+        ]
+        
+        return .init(description: description, messages: messages)
+        
+    case "customer-support":
+        // Similar implementation for customer support prompt
+        break
+        
+    default:
+        throw MCPError.invalidParams("Unknown prompt name: \(params.name)")
+    }
+    return GetPrompt.Result(description: "Something went wrong", messages: [])
+}
+
 // Create MCP service and other services
 let transport = StdioTransport(logger: logger)
 let mcpService = MCPService(server: server, transport: transport)
