@@ -1,3 +1,4 @@
+import Foundation
 import MCP
 import FoundationModels
 import ServiceLifecycle
@@ -16,7 +17,7 @@ let server = Server(
     )
 )
 
-// Add handlers directly to the server
+// MARK: Tools
 await server.withMethodHandler(ListTools.self) { _ in
     let tools = [
         Tool(
@@ -114,6 +115,59 @@ await server.withMethodHandler(CallTool.self) { params in
 
     default:
         return .init(content: [.text("Unknown tool")], isError: true)
+    }
+}
+
+// MARK: Resource
+
+// Register a resource list handler
+await server.withMethodHandler(ListResources.self) { params in
+    let resources = [
+        Resource(
+            name: "Knowledge Base Articles",
+            uri: "resource://knowledge-base/articles",
+            description: "Collection of support articles and documentation"
+        ),
+        Resource(
+            name: "System Status",
+            uri: "resource://system/status",
+            description: "Current system operational status"
+        )
+    ]
+    return .init(resources: resources, nextCursor: nil)
+}
+
+// Register a resource read handler
+await server.withMethodHandler(ReadResource.self) { params in
+    switch params.uri {
+    case "resource://knowledge-base/articles":
+        return .init(contents: [Resource.Content.text("# Knowledge Base\n\nThis is the content of the knowledge base...", uri: params.uri)])
+
+    case "resource://system/status":
+        let versionString = ProcessInfo.processInfo.operatingSystemVersionString
+        var appleIntelligenceAvailable = false
+        var modelAvailable = false
+        
+        if #available(macOS 26.0, *) {
+            appleIntelligenceAvailable = true
+            let model = SystemLanguageModel( guardrails: .permissiveContentTransformations)
+            if model.availability == .available {
+                modelAvailable = true
+            }
+        }
+
+        let statusJson = """
+            {
+                "osVersion": "\(versionString)",
+                "Apple Intelligence available": "\(appleIntelligenceAvailable)",
+                "Foundation Model available": "\(modelAvailable)",
+                "lastUpdated": "\(Date().description)"
+            }
+            """
+        return .init(contents: [Resource.Content.text(statusJson, uri: params.uri, mimeType: "application/json")])
+
+    default:
+        throw MCPError.invalidParams("Unknown resource URI: \(params.uri)")
     }
 }
 
