@@ -31,7 +31,7 @@ await server.withMethodHandler(ListTools.self) { _ in
                         "type": .string("string")
                     ]),
                     "prompt": .object([
-                    "description": .string("Instructions to model"),
+                    "description": .string("Prompt to model"),
                     "type": .string("string")
                     ])
                 ])
