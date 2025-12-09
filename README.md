@@ -5,6 +5,10 @@ A simple MCP server in Swift, running on macOS
 
 For my current use-case — and to better understand the Model Context Protocol (MCP) — I built a small MCP tool that processes a string using the Apple Foundation Models. I used the [official Swift SDK for Model Context Protocol servers and clients](https://github.com/modelcontextprotocol/swift-sdk), and the result is a minimal, working MCP server you can use as a reference.
 
+## The Use-Case
+
+I am using this MCP server with Codex as *Tool-augmented prompt evolution*: Codex generates or rewrites prompts, and the server immediately evaluates them in Apple’s Foundation Models. This enables fast iteration and hands-free prompt testing.
+
 ## Challenges
 
 The documentation of the  [MCP Swift SDK]((https://github.com/modelcontextprotocol/swift-sdk)) still follows an older version of the specification and does not match the current [MCP 2025-06-18 tool schema](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).
