@@ -9,6 +9,22 @@ For my current use-case — and to better understand the Model Context Protocol 
 
 I am using this MCP server with Codex as *Tool-augmented prompt evolution*: Codex generates or rewrites prompts, and the server immediately evaluates them in Apple’s Foundation Models. This enables fast iteration and hands-free prompt testing.
 
+## Using the Server
+
+Build the server by executing `swift build -c release`. The executable will be in `.build/release/hellomcp`, you can copy it anywhere you like.
+
+To examine the server with the [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector), run it like this: `npx @modelcontextprotocol/inspector ${PATH_TO_HELLOMCP}`
+
+For Codex, add HelloMCP by running: `codex mcp add HelloMCP ${PATH_TO_HELLOMCP}`. Codex will then use MCP for example for this prompt: `Run the prompt "Say Hello" with Apple Foundation Models`.
+
+Quick verification once it is running:
+- Check platform/model availability via the status resource:
+  ```
+  codex mcp read HelloMCP resource://system/status
+  ```
+  You should see JSON fields like `"Apple Intelligence available": "true"` and `"Foundation Model available": "true"`.
+- Test a tool call. In Codex: `codex mcp call HelloMCP applechat --prompt "Say Hello"` (add `--instructions "Be brief"` if you like). In the Inspector, open Resources → `resource://system/status` to confirm availability, then Tools → `applechat` and send a prompt. Either path should return a model response if everything is wired correctly.
+
 ## Challenges
 
 The documentation of the  [MCP Swift SDK]((https://github.com/modelcontextprotocol/swift-sdk)) still follows an older version of the specification and does not match the current [MCP 2025-06-18 tool schema](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).
