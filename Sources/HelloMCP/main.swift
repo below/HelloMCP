@@ -1,239 +1,121 @@
 import Foundation
-import MCP
-import FoundationModels
-import ServiceLifecycle
+import HelloMCPCore
 import Logging
+import MCP
 
-let logger = Logger(label: "com.example.mcp-server")
+let logger = Logger(label: "com.example.hellomcp")
+let runner = FoundationModelRunner()
+let diagnostics = RuntimeDiagnostics()
 
-// Create the MCP server
 let server = Server(
     name: "HelloMCP",
-    version: "1.0.0",
+    version: helloMCPServerVersion,
+    title: "HelloMCP",
+    instructions: helloMCPInstructions,
     capabilities: .init(
-        prompts: .init(listChanged: true),
-        resources: .init(subscribe: true, listChanged: true),
-        tools: .init(listChanged: true)
+        resources: .init(subscribe: false, listChanged: false),
+        tools: .init(listChanged: false)
     )
 )
 
-// MARK: Tools
 await server.withMethodHandler(ListTools.self) { _ in
-    let tools = [
-        Tool(
-            name: "applechat",
-            description: "Execute a string using Apple Foundation Models",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "instructions": .object([
-                        "description": .string("Instructions to model"),
-                        "type": .string("string")
-                    ]),
-                    "prompt": .object([
-                    "description": .string("Prompt to model"),
-                    "type": .string("string")
-                    ])
-                ])
-            ])
-        ),
-        Tool(
-            name: "weather",
-            description: "Get current weather for a location",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "location": .object([
-                        "description":                             .string("City name or coordinates"),
-                        "type": .string("string"),
-                        "units": .string("Units of measurement, e.g., metric, imperial")
-                    ])
-                    
-                ])
-            ])
-        ),
-        Tool(
-            name: "calculator",
-            description: "Perform calculations",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "expression": .object([
-                        "type": .string("string"),
-                        "description": .string("Mathematical expression to evaluate")
-                    ])
-                ])
-            ])
-        )
-    ]
-    return .init(tools: tools)
+    .init(tools: [runFoundationModelPromptTool()])
 }
 
 await server.withMethodHandler(CallTool.self) { params in
-    switch params.name {
-    case "applechat":
-        let instructions: String? = params.arguments?["instructions"]?.stringValue
-        let prompt = params.arguments?["prompt"]?.stringValue ?? ""
-        if #available(macOS 26.0, *) {
-            let model = SystemLanguageModel( guardrails: .permissiveContentTransformations)
-            guard model.availability == .available else {
-                return .init(content: [.text("Model not available")], isError: true)
-            }
-            let session = LanguageModelSession(model: model, instructions: instructions)
-            do {
-                let response = try await session.respond(to: prompt)
-                return .init(content: [.text(response.content)], isError: false)
-            } catch {
-                return .init(
-                    content: [.text("Unable to respond")],
-                    isError: true
-                )
-            }
-        } else {
-            return .init(
-                content: [.text("Tool Server is not on macOS 26")],
-                isError: true
-            )
-        }
-
-    case "weather":
-        let location = params.arguments?["location"]?.stringValue ?? "Unknown"
-        let units = params.arguments?["units"]?.stringValue ?? "metric"
-        let weatherData = getWeatherData(location: location, units: units) // Your implementation
-        return .init(
-            content: [.text("Weather for \(location): \(weatherData.temperature)°, \(weatherData.conditions)")],
-            isError: false
+    guard params.name == runFoundationModelPromptToolName else {
+        let response = PromptToolResponse(
+            response: nil,
+            sessionId: nil,
+            stateless: true,
+            durationMs: 0,
+            modelAvailable: false,
+            availability: "unknown",
+            error: .init(code: "unknown_tool", message: "Unknown tool: \(params.name)")
         )
+        return try .init(
+            content: [.text(text: response.error?.message ?? "Unknown tool", annotations: nil, _meta: nil)],
+            structuredContent: response,
+            isError: true
+        )
+    }
 
-    case "calculator":
-        if let expression = params.arguments?["expression"]?.stringValue {
-            let result = evaluateExpression(expression) // Your implementation
-            return .init(content: [.text("\(result)")], isError: false)
+    do {
+        let request = try PromptToolRequest.parse(arguments: params.arguments)
+        let response = await runner.respond(to: request)
+        if let error = response.error {
+            await diagnostics.record(error: error)
         } else {
-            return .init(content: [.text("Missing expression parameter")], isError: true)
+            await diagnostics.clearError()
         }
 
-    default:
-        return .init(content: [.text("Unknown tool")], isError: true)
+        return try .init(
+            content: [.text(text: response.response ?? response.error?.message ?? "No response", annotations: nil, _meta: nil)],
+            structuredContent: response,
+            isError: response.error != nil
+        )
+    } catch let error as PromptToolValidationError {
+        let toolError = PromptToolError(code: error.code, message: error.message)
+        await diagnostics.record(error: toolError)
+        let response = PromptToolResponse(
+            response: nil,
+            sessionId: params.arguments?["sessionId"]?.stringValue,
+            stateless: params.arguments?["sessionId"]?.stringValue == nil,
+            durationMs: 0,
+            modelAvailable: false,
+            availability: "notChecked",
+            error: toolError
+        )
+        return try .init(
+            content: [.text(text: error.message, annotations: nil, _meta: nil)],
+            structuredContent: response,
+            isError: true
+        )
+    } catch {
+        let toolError = PromptToolError(code: "invalid_arguments", message: String(describing: error))
+        await diagnostics.record(error: toolError)
+        let response = PromptToolResponse(
+            response: nil,
+            sessionId: params.arguments?["sessionId"]?.stringValue,
+            stateless: params.arguments?["sessionId"]?.stringValue == nil,
+            durationMs: 0,
+            modelAvailable: false,
+            availability: "notChecked",
+            error: toolError
+        )
+        return try .init(
+            content: [.text(text: toolError.message, annotations: nil, _meta: nil)],
+            structuredContent: response,
+            isError: true
+        )
     }
 }
 
-// MARK: Resource
-
-// Register a resource list handler
-await server.withMethodHandler(ListResources.self) { params in
+await server.withMethodHandler(ListResources.self) { _ in
     let resources = [
         Resource(
-            name: "Knowledge Base Articles",
-            uri: "resource://knowledge-base/articles",
-            description: "Collection of support articles and documentation"
-        ),
-        Resource(
             name: "System Status",
-            uri: "resource://system/status",
-            description: "Current system operational status"
+            uri: systemStatusResourceURI,
+            description: "Current HelloMCP and Apple Foundation Models availability status",
+            mimeType: "application/json"
         )
     ]
     return .init(resources: resources, nextCursor: nil)
 }
 
-// Register a resource read handler
 await server.withMethodHandler(ReadResource.self) { params in
-    switch params.uri {
-    case "resource://knowledge-base/articles":
-        return .init(contents: [Resource.Content.text("# Knowledge Base\n\nThis is the content of the knowledge base...", uri: params.uri)])
-
-    case "resource://system/status":
-        let versionString = ProcessInfo.processInfo.operatingSystemVersionString
-        var appleIntelligenceAvailable = false
-        var modelAvailable = false
-        
-        if #available(macOS 26.0, *) {
-            appleIntelligenceAvailable = true
-            let model = SystemLanguageModel( guardrails: .permissiveContentTransformations)
-            if model.availability == .available {
-                modelAvailable = true
-            }
-        }
-
-        let statusJson = """
-            {
-                "osVersion": "\(versionString)",
-                "Apple Intelligence available": "\(appleIntelligenceAvailable)",
-                "Foundation Model available": "\(modelAvailable)",
-                "lastUpdated": "\(Date().description)"
-            }
-            """
-        return .init(contents: [Resource.Content.text(statusJson, uri: params.uri, mimeType: "application/json")])
-
-    default:
+    guard params.uri == systemStatusResourceURI else {
         throw MCPError.invalidParams("Unknown resource URI: \(params.uri)")
     }
+
+    let lastError = await diagnostics.currentLastError()
+    let status = await runner.status(lastError: lastError)
+    let json = try jsonString(status)
+    return .init(contents: [
+        Resource.Content.text(json, uri: params.uri, mimeType: "application/json")
+    ])
 }
 
-// MARK: Prompts
-
-// Register a prompt list handler
-await server.withMethodHandler(ListPrompts.self) { params in
-    let prompts = [
-        Prompt(
-            name: "interview",
-            description: "Job interview conversation starter",
-            arguments: [
-                .init(name: "position", description: "Job position", required: true),
-                .init(name: "company", description: "Company name", required: true),
-                .init(name: "interviewee", description: "Candidate name")
-            ]
-        ),
-        Prompt(
-            name: "customer-support",
-            description: "Customer support conversation starter",
-            arguments: [
-                .init(name: "issue", description: "Customer issue", required: true),
-                .init(name: "product", description: "Product name", required: true)
-            ]
-        )
-    ]
-    return .init(prompts: prompts, nextCursor: nil)
-}
-
-// Register a prompt get handler
-await server.withMethodHandler(GetPrompt.self) { params in
-    switch params.name {
-    case "interview":
-        let position = params.arguments?["position"]?.stringValue ?? "Software Engineer"
-        let company = params.arguments?["company"]?.stringValue ?? "Acme Corp"
-        let interviewee = params.arguments?["interviewee"]?.stringValue ?? "Candidate"
-        
-        let description = "Job interview for \(position) position at \(company)"
-        let messages: [MCP.Prompt.Message] = [
-            .user("You are an interviewer for the \(position) position at \(company)."),
-            .user("Hello, I'm \(interviewee) and I'm here for the \(position) interview."),
-            .assistant("Hi \(interviewee), welcome to \(company)! I'd like to start by asking about your background and experience.")
-        ]
-        
-        return .init(description: description, messages: messages)
-        
-    case "customer-support":
-        // Similar implementation for customer support prompt
-        break
-        
-    default:
-        throw MCPError.invalidParams("Unknown prompt name: \(params.name)")
-    }
-    return GetPrompt.Result(description: "Something went wrong", messages: [])
-}
-
-// Create MCP service and other services
 let transport = StdioTransport(logger: logger)
-let mcpService = MCPService(server: server, transport: transport)
-
-// Create service group with signal handling
-let serviceGroup = ServiceGroup(
-    services: [mcpService],
-    gracefulShutdownSignals: [.sigterm, .sigint],
-    logger: logger
-)
-
-// Run the service group - this blocks until shutdown
-try await serviceGroup.run()
+try await server.start(transport: transport)
+try await Task.sleep(for: .seconds(60 * 60 * 24 * 365 * 100))

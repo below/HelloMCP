@@ -1,80 +1,151 @@
 # HelloMCP
-A simple MCP server in Swift, running on macOS
 
-## Introduction
+HelloMCP is a local stdio MCP server for using Apple's on-device Foundation Models from any compatible MCP client, such as Codex or Claude Code.
 
-For my current use-case — and to better understand the Model Context Protocol (MCP) — I built a small MCP tool that processes a string using the Apple Foundation Models. I used the [official Swift SDK for Model Context Protocol servers and clients](https://github.com/modelcontextprotocol/swift-sdk), and the result is a minimal, working MCP server you can use as a reference.
+## Purpose
 
-## The Use-Case
+The server is designed for tool-augmented prompt evolution: an MCP client can draft or revise a prompt, call Apple Foundation Models locally, inspect the result, and iterate.
 
-I am using this MCP server with Codex as *Tool-augmented prompt evolution*: Codex generates or rewrites prompts, and the server immediately evaluates them in Apple’s Foundation Models. This enables fast iteration and hands-free prompt testing.
+HelloMCP exposes one tool:
 
-## Using the Server
+- `run_foundation_model_prompt`: evaluates a prompt with Apple Foundation Models.
 
-Build the server by executing `swift build -c release`. The executable will be in `.build/release/hellomcp`, you can copy it anywhere you like.
+It also exposes one resource:
 
-To examine the server with the [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector), run it like this: `npx @modelcontextprotocol/inspector ${PATH_TO_HELLOMCP}`
+- `resource://system/status`: reports server, OS, model availability, active session count, and the last tool error.
 
-For Codex, add HelloMCP by running: `codex mcp add HelloMCP ${PATH_TO_HELLOMCP}`. Codex will then use MCP for example for this prompt: `Run the prompt "Say Hello" with Apple Foundation Models`.
+## Requirements
 
-Quick verification once it is running:
-- Check platform/model availability via the status resource:
-  ```
-  codex mcp read HelloMCP resource://system/status
-  ```
-  You should see JSON fields like `"Apple Intelligence available": "true"` and `"Foundation Model available": "true"`.
-- Test a tool call. In Codex: `codex mcp call HelloMCP applechat --prompt "Say Hello"` (add `--instructions "Be brief"` if you like). In the Inspector, open Resources → `resource://system/status` to confirm availability, then Tools → `applechat` and send a prompt. Either path should return a model response if everything is wired correctly.
+- macOS 26 or newer for Foundation Models execution.
+- Apple Intelligence and the system language model must be available on the machine.
+- Swift 6 and the Swift Package Manager.
+- An MCP client, such as Codex.
 
-## Challenges
+## Build
 
-The documentation of the  [MCP Swift SDK]((https://github.com/modelcontextprotocol/swift-sdk)) still follows an older version of the specification and does not match the current [MCP 2025-06-18 tool schema](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).
-
-For example, the documentation shows a tool defined like this:
-```swift
-        Tool(
-            name: "weather",
-            description: "Get current weather for a location",
-            inputSchema: .object([
-                "properties": .object([
-                    "location": .string("City name or coordinates"),
-                    "units": .string("Units of measurement, e.g., metric, imperial")
-                ])
-            ])
-        )
+```bash
+swift build -c release
 ```
-However:
--	The [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector) will not list tools defined in this format.
--	The root cause is that the schema must follow the JSON Schema–shaped structure expected by current MCP servers, including explicit "type" annotations and object-typed field descriptors.
 
-The corrected version looks like this:
-```swift
-        Tool(
-            name: "weather",
-            description: "Get current weather for a location",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "location": .object([
-                        "description": .string("City name or coordinates"),
-                        "type": .string("string"),
-                        "units": .string("Units of measurement, e.g., metric, imperial")
-                    ])
-                    
-                ])
-            ])
-        )
+The executable is created at:
+
+```bash
+.build/release/hellomcp
 ```
-Key differences compared to the documentation:
-1.	Every schema object must declare its "type" explicitly.
-2.	Properties must themselves be JSON-object descriptors, not bare `.string(…)` values.
-3.	Descriptions belong inside the dictionary of each property, not as the property value.
-4.	Adding "required" improves compatibility with the Inspector and many clients.
 
-Once defined this way, the MCP Inspector correctly discovers and validates the tool.
+## Add To Codex
 
----
+Use the absolute path to the built executable:
 
-That’s it — a tiny but complete MCP server in Swift, and a working reference for defining tools using the up-to-date schema.
+```bash
+codex mcp add HelloMCP /absolute/path/to/.build/release/hellomcp
+```
 
-![The MCP Inspector using the applechat tool](Inspector.png "MCP Inspector")
-Have fun building your own MCP tools! If you run into issues, feel free to ask — I’m happy to help.
+Equivalent `~/.codex/config.toml` entry:
+
+```toml
+[mcp_servers.HelloMCP]
+command = "/absolute/path/to/.build/release/hellomcp"
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+```
+
+Restart Codex after changing MCP configuration. In the Codex TUI, use `/mcp` to confirm the server is connected.
+
+## Verify Status
+
+```bash
+codex mcp read HelloMCP resource://system/status
+```
+
+The response is JSON and includes fields such as `foundationModelsAvailable`, `availability`, `activeSessionCount`, and `lastError`.
+
+## Conversational Use
+
+Once the server is connected, you can ask your MCP client to use Apple Foundation Models in plain language. In Codex, for example:
+
+```text
+Evaluate the prompt: "Wish the user a good morning" with Apple Foundation Models.
+```
+
+Codex should route that request to `run_foundation_model_prompt` and return the local model response.
+
+## Call The Tool
+
+Stateless call:
+
+```bash
+codex mcp call HelloMCP run_foundation_model_prompt \
+  --prompt "Say hello in one short sentence." \
+  --instructions "Be brief."
+```
+
+Use optional generation controls:
+
+```bash
+codex mcp call HelloMCP run_foundation_model_prompt \
+  --prompt "Give three alternative titles for this README." \
+  --temperature 0.4 \
+  --maximumResponseTokens 128
+```
+
+Use explicit temporary context across calls:
+
+```bash
+codex mcp call HelloMCP run_foundation_model_prompt \
+  --sessionId prompt-eval-1 \
+  --prompt "Remember that the target audience is Swift developers."
+
+codex mcp call HelloMCP run_foundation_model_prompt \
+  --sessionId prompt-eval-1 \
+  --prompt "Rewrite the previous answer for that audience."
+```
+
+Reset a named session before using it:
+
+```bash
+codex mcp call HelloMCP run_foundation_model_prompt \
+  --sessionId prompt-eval-1 \
+  --resetSession true \
+  --prompt "Start a fresh prompt evaluation."
+```
+
+Session state is in memory only. It lasts only while the MCP server process remains alive.
+
+## Tool Arguments
+
+| Name | Required | Type | Notes |
+| --- | --- | --- | --- |
+| `prompt` | Yes | String | Prompt to evaluate. |
+| `instructions` | No | String | Foundation Models session instructions. |
+| `sessionId` | No | String | Enables explicit multi-turn context. Use ASCII letters, digits, `_`, `-`, or `.`. |
+| `resetSession` | No | Boolean | Recreates the named session before responding. |
+| `maximumResponseTokens` | No | Integer | Must be positive. Can truncate output. |
+| `temperature` | No | Number | Must be between `0` and `1`, inclusive. Omit for the system default. |
+
+## Result Shape
+
+The tool returns native MCP `structuredContent` and a text summary. The structured content has this shape:
+
+```json
+{
+  "response": "...",
+  "sessionId": null,
+  "stateless": true,
+  "durationMs": 1234,
+  "modelAvailable": true,
+  "availability": "available",
+  "warnings": [],
+  "error": null
+}
+```
+
+On failure, `error` contains a stable `code` and readable `message`.
+
+## Inspect With MCP Inspector
+
+```bash
+npx @modelcontextprotocol/inspector /absolute/path/to/.build/release/hellomcp
+```
+
+Use the Inspector to verify tool schema, output schema, structured content, and `resource://system/status`.

@@ -5,17 +5,28 @@ import PackageDescription
 let package = Package(
     name: "HelloMCP",
     platforms: [.macOS(.v15)],
-    products: [.executable(name: "hellomcp", targets: ["HelloMCP"])],
+    products: [
+        .library(name: "HelloMCPCore", targets: ["HelloMCPCore"]),
+        .executable(name: "hellomcp", targets: ["HelloMCP"])
+    ],
     dependencies: [
-        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.3.0"),
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.0")
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.1")
     ],
     targets: [
+        .target(
+            name: "HelloMCPCore",
+            dependencies: [.product(name: "MCP", package: "swift-sdk")]
+        ),
         .executableTarget(
             name: "HelloMCP",
-            dependencies: [.product(name: "MCP", package: "swift-sdk"),
-                           .product(name: "ServiceLifecycle", package: "swift-service-lifecycle")
+            dependencies: [
+                "HelloMCPCore",
+                .product(name: "MCP", package: "swift-sdk")
             ]
+        ),
+        .testTarget(
+            name: "HelloMCPCoreTests",
+            dependencies: ["HelloMCPCore"]
         )
     ]
 )
